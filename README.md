@@ -58,7 +58,7 @@ SVGA 含内嵌音频时自动合入 MOV，没有音频时不添加音轨。按 s
 - 核对透明背景、50% Alpha、颜色、位置和帧数。
 - 2 倍尺寸、24 fps、2 次循环 → ProRes 4444 透明 MOV，48 帧、2 秒。
 - 界面默认值、IPC 文件入队、后台渲染及文件自动避让。
-- Windows x64 产物交叉打包；没有在真实 Windows 上进行启动或 AE 导入测试。
+- Windows Actions 已通过单元测试和实际转换检查（画布扩充、透明通道、内嵌音频及无音频输入）；尚未进行人工双击启动及 AE 导入测试。
 
 ## 从源码构建
 需要 Windows x64 + Node.js 24 LTS。
@@ -73,4 +73,4 @@ FFmpeg 下载脚本校验 SHA-256，构建时不依赖机器上已有的 FFmpeg�
 
 ## GitHub 自动构建
 
-首次上传、修改 package.json 或构建工作流后，main 分支自动运行 Windows 测试、构建并发布当前版本；也可以在 Actions → Build and release Windows → Run workflow 手动运行。已有版本的 Release 不会被覆盖，重跑结果保留在对应 Actions 的 Artifacts 中。发布新版本时更新 package.json 版本及 EXE 名称。
+首次上传、修改程序源码、测试、构建脚本、依赖配置或构建工作流后，main 分支自动运行 Windows 测试、构建并发布当前版本；也可以在 Actions → Build and release Windows → Run workflow 手动运行。已有版本的 Release 不会被覆盖，重跑结果保留在对应 Actions 的 Artifacts 中。发布新版本时更新 package.json 版本及 EXE 名称。
