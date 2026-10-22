@@ -1,0 +1,14 @@
+SVGAPlayer-Web 2.3.2, Apache-2.0. https://github.com/svga/SVGAPlayer-Web
+License: app/SVGA-LICENSE.txt
+Electron 45.0.0, MIT and Chromium third-party licenses included in runtime.
+https://github.com/electron/electron
+FFmpeg 6.1.1 static build supplied by ffmpeg-static b6.1.1; GPL-3.0-or-later.
+https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1
+FFmpeg source: https://ffmpeg.org/releases/ffmpeg-6.1.1.tar.xz
+Build recipes and corresponding build source: https://github.com/eugeneware/ffmpeg-static/tree/b6.1.1
+This utility source is supplied alongside the executable under GPL-3.0-or-later.
+JSZip 3.10.1, MIT (chosen) OR GPL-3.0-or-later; app/JSZIP-LICENSE.txt.
+JSZip Utils 0.1.0, MIT; app/JSZIP-UTILS-LICENSE.txt.
+protobuf.js and its protobufjs/long dependencies, BSD-3-Clause/MIT as distributed in their packages.
+https://github.com/protobufjs/protobuf.js ; app/PROTOBUFJS-LICENSE.txt
+SVGA AudioEntity wire definition follows https://github.com/svga/SVGA-Format/blob/master/proto/svga.proto

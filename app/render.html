@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src data: blob:"></head><body><canvas id="canvas"></canvas><script src="jszip.min.js"></script><script src="jszip-utils.min.js"></script><script src="svga.min.js"></script><script>
+let player,video,canvas=document.getElementById('canvas');
+window.loadSVGA=async function(b64){
+ video=await Promise.race([new Promise((resolve,reject)=>new SVGA.Parser().load('data:svga/'+(b64.startsWith('UEsDB')?'1.0':'2.0')+';base64,'+b64,resolve,reject)),new Promise((_,reject)=>setTimeout(()=>reject(Error('SVGA 解析超时或文件损坏')),60000))]);
+ canvas.width=Math.round(video.videoSize.width);canvas.height=Math.round(video.videoSize.height);
+ player=new SVGA.Player(canvas);player.setVideoItem(video);
+ // Decode all raster assets explicitly, including JPEG variants unsupported by the legacy readiness check.
+ const cache={};await Promise.all(Object.entries(video.images).filter(([k,v])=>!/^SUQz|^\/\/+/.test(v)).map(async([k,v])=>{
+ if(!/^(iVBO|\/9j)/.test(v))return;
+ const im=new Image();im.src='data:image/'+(v.startsWith('/9j')?'jpeg':'png')+';base64,'+v;
+ await im.decode();cache[k.replace('.matte','')]=im;
+ }));
+ player._renderer._bitmapCache=cache;player._renderer._prepared=true;player._renderer.playAudio=()=>{};
+ return {width:video.videoSize.width,height:video.videoSize.height,fps:video.FPS,frames:video.frames,hasAudio:!!(video.audios&&video.audios.length)};
+};
+// Render sprites directly into the expanded target. Never pad a pre-cropped bitmap.
+window.resizeOutput=(w,h,padding=0)=>{
+ canvas.width=w;canvas.height=h;
+ player._resize=()=>{
+  const contentW=w-2*padding,contentH=h-2*padding;
+  const s=Math.min(contentW/video.videoSize.width,contentH/video.videoSize.height);
+  player._globalTransform={a:s,b:0,c:0,d:s,tx:padding+(contentW-video.videoSize.width*s)/2,ty:padding+(contentH-video.videoSize.height*s)/2};
+ };
+};
+window.renderFrame=i=>{player.stepToFrame(i,false);return canvas.toDataURL('image/png').split(',')[1];};
+</script></body></html>

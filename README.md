@@ -1,4 +1,10 @@
-# SVGA 转透明 MOV（Windows 10/11 x64）
+# SVG2MOV
+
+[下载最新 Windows 版](https://github.com/meiliyitian2020-cyber/SVG2MOV/releases/latest) · [自动构建状态](https://github.com/meiliyitian2020-cyber/SVG2MOV/actions)
+
+完整源码、测试素材与构建脚本保存在本仓库。EXE、ZIP、源码压缩包及 SHA-256 校验值由 Windows Actions 构建后发布到 Releases。
+
+## SVGA 转透明 MOV（Windows 10/11 x64）
 
 ## 使用
 1. 双击 `SVGA-MOV-Exporter-1.2.0.exe`。
@@ -64,3 +70,7 @@ SVGA 含内嵌音频时自动合入 MOV，没有音频时不添加音轨。按 s
 产物在 `dist-1.2`。`npm test` 执行核心参数和时间采样测试。
 FFmpeg 下载脚本校验 SHA-256，构建时不依赖机器上已有的 FFmpeg。
 第三方组件及许可证见 `THIRD_PARTY.txt`、`LICENSE` 及 `app/*LICENSE*`。
+
+## GitHub 自动构建
+
+首次上传、修改 package.json 或构建工作流后，main 分支自动运行 Windows 测试、构建并发布当前版本；也可以在 Actions → Build and release Windows → Run workflow 手动运行。已有版本的 Release 不会被覆盖，重跑结果保留在对应 Actions 的 Artifacts 中。发布新版本时更新 package.json 版本及 EXE 名称。
