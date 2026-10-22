@@ -1,8 +1,9 @@
+const path=require('node:path');
 const {test}=require('node:test'),assert=require('node:assert/strict'),c=require('../app/core');
 test('defaults preserve original timing and geometry',()=>{const m={width:375,height:667,fps:24,frames:49},p=c.plan(m,{...c.defaults,padding:0});assert.equal(p.w,375);assert.equal(p.h,667);assert.equal(p.fps,24);assert.equal(p.frames,49);for(let i=0;i<49;i++)assert.equal(c.frameAt(i,p,m),i);assert.equal(p.codec,'png');assert.ok(c.encoderArgs(p,'out.mov').includes('rgba'));});
 test('fps conversion and loops retain cycle duration',()=>{const m={width:100,height:100,fps:20,frames:40},p=c.plan(m,{fps:30,loops:2,scale:2,padding:0});assert.equal(p.frames,120);assert.equal(p.w,200);assert.equal(c.frameAt(59,p,m),39);assert.equal(c.frameAt(60,p,m),0);});
 test('reject bad settings and excessive dimensions',()=>{assert.throws(()=>c.settings({compression:10}));assert.throws(()=>c.settings({fps:-1}));assert.throws(()=>c.plan({width:5000,height:5000,fps:30,frames:10},{scale:4}));});
-test('output suffix handles unicode and multiple extensions',()=>{assert.equal(c.outputName('/test/礼物.v2.svga',''),'/test/礼物.v2_mov导出.mov');});
+test('output suffix handles unicode and multiple extensions',()=>{assert.equal(c.outputName(path.join('test','礼物.v2.svga'),''),path.join('test','礼物.v2_mov导出.mov'));});
 
 test('expanded canvas defaults to 200 per output side without changing content size',()=>{const m={width:500,height:300,fps:24,frames:48};const p=c.plan(m,{});assert.equal(c.defaults.padding,200);assert.equal(p.w,900);assert.equal(p.h,700);assert.equal(p.contentW,500);assert.equal(p.contentH,300);const q=c.plan(m,{scale:2,padding:200});assert.equal(q.w,1400);assert.equal(q.contentW,1000);assert.equal(c.settings({scale:1}).padding,200);});
 test('padding validation checks total dimensions',()=>{for(const padding of [-1,1.5,NaN,Infinity,4097])assert.throws(()=>c.settings({padding}));assert.throws(()=>c.plan({width:8000,height:100,fps:30,frames:1},{padding:200}));});
