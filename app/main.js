@@ -1,8 +1,10 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,dialog,shell}=require('electron');
+const {app,BrowserWindow,ipcMain,dialog,shell,screen}=require('electron');
 const fs=require('fs'),fsp=fs.promises,path=require('path'),os=require('os'),{spawn}=require('child_process');
 const core=require('./core'),audioEngine=require('./audio');
-let win,active=null,queue=[],config={...core.defaults},allowed=new Set();
+let win,active=null,queue=[],draining=false,config={...core.defaults},allowed=new Set();
+app.setName('SVGA 转 MOV');
+app.setPath('userData',path.join(app.getPath('appData'),'SVGA-MOV-Exporter'));
 const selftest=process.argv.includes('--self-test');
 if(process.env.SVGA_TEST_SETTINGS)app.setPath('userData',process.env.SVGA_TEST_SETTINGS);
 if(process.platform==='linux')app.commandLine.appendSwitch('no-sandbox');
@@ -71,27 +73,49 @@ async function runEncoder(job,args){
  if(job.cancelled)throw Error('已取消');if(code!==0)throw Error('音频导出失败：'+(err||code));
 }
 
-async function drain(){if(active)return;while(queue.length){const item=queue.shift();emit({type:'start',input:item.input});try{const r=await convert(item.input,item.s,d=>emit({...d,input:item.input}));emit({type:'done',input:item.input,output:r.output});}catch(e){emit({type:'error',input:item.input,message:e.message});}}emit({type:'idle'});}
+async function drain(){
+ if(draining)return;draining=true;const outputs=[];let failed=0,cancelled=0;
+ try{while(queue.length){
+  const item=queue.shift();emit({type:'start',input:item.input});
+  try{const result=await convert(item.input,item.s,d=>emit({...d,input:item.input}));outputs.push(result.output);emit({type:'done',input:item.input,output:result.output});}
+  catch(e){const wasCancelled=e.message==='已取消';if(wasCancelled)cancelled++;else failed++;emit({type:'error',input:item.input,message:e.message,cancelled:wasCancelled});}
+ }}finally{draining=false;emit({type:'idle',outputs,failed,cancelled});}
+}
+async function loadSettings(){
+ const candidates=[configPath()];
+ if(!process.env.SVGA_TEST_SETTINGS)for(const name of ['SVGA MOV Exporter','svga-mov-exporter'])candidates.push(path.join(app.getPath('appData'),name,'settings.json'));
+ for(const candidate of candidates){try{return core.settings(JSON.parse(await fsp.readFile(candidate,'utf8')));}catch{}}
+ return {...core.defaults};
+}
 app.whenReady().then(async()=>{
  if(selftest){try{const input=process.argv[process.argv.indexOf('--self-test')+1];const result=await convert(input,{...core.defaults,...JSON.parse(process.env.TEST_OPTIONS||'{}'),outputDir:process.env.TEST_OUTPUT||''},d=>console.log(JSON.stringify(d)));console.log('TEST_RESULT '+JSON.stringify(result));app.exit(0);}catch(e){console.error(e);app.exit(1);}return;}
- try{config=core.settings(JSON.parse(await fsp.readFile(configPath(),'utf8')));}catch{}
- win=new BrowserWindow({width:960,height:760,minWidth:800,minHeight:620,title:'SVGA 转 MOV',backgroundColor:'#f4f5f7',webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+ config=await loadSettings();
+ const area=screen.getPrimaryDisplay().workAreaSize;
+ const width=Math.max(620,Math.min(840,area.width-48)),height=Math.max(420,Math.min(620,area.height-96));
+ win=new BrowserWindow({useContentSize:true,width,height,minWidth:620,minHeight:420,title:'SVGA 转 MOV',icon:path.join(__dirname,'assets','icon.png'),backgroundColor:'#f5f7f7',webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  win.setMenuBarVisibility(false);win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  ipcMain.handle('get-settings',()=>config);
  ipcMain.handle('save-settings',async(_,s)=>{config=core.settings(s);await fsp.mkdir(path.dirname(configPath()),{recursive:true});await fsp.writeFile(configPath(),JSON.stringify(config,null,2));return config;});
  ipcMain.handle('pick',async()=>{const r=await dialog.showOpenDialog(win,{properties:['openFile','multiSelections'],filters:[{name:'SVGA 动画',extensions:['svga']}]});return r.canceled?[]:r.filePaths;});
  ipcMain.handle('folder',async()=>{const r=await dialog.showOpenDialog(win,{properties:['openDirectory']});return r.canceled?'':r.filePaths[0];});
- ipcMain.handle('add',async(_,files)=>{if(!Array.isArray(files))throw Error('文件列表无效');const valid=[];for(const f of files){if(typeof f==='string'&&path.extname(f).toLowerCase()==='.svga'&&(await fsp.stat(f)).isFile()){if(active?.input===f||queue.some(x=>x.input===f))continue;valid.push(f);queue.push({input:f,s:{...config}});}}emit({type:'queued',files:valid});setImmediate(drain);return valid.length;});
- ipcMain.handle('cancel',()=>{queue=[];if(active){active.cancelled=true;active.child?.kill();}emit({type:'cancelled'});});
+ ipcMain.handle('add',async(_,files)=>{
+  if(!Array.isArray(files))throw Error('文件列表无效');const valid=[];let unreadable=0;
+  for(const file of files){
+   if(typeof file!=='string'||path.extname(file).toLowerCase()!=='.svga')continue;
+   if(active?.input===file||queue.some(x=>x.input===file)||valid.includes(file))continue;
+   try{if((await fsp.stat(file)).isFile())valid.push(file);}catch{unreadable++;}
+  }
+  for(const input of valid)queue.push({input,s:{...config}});
+  emit({type:'queued',files:valid});if(unreadable)emit({type:'notice',message:unreadable+' 个文件无法读取，请检查文件位置。'});
+  if(valid.length)setImmediate(drain);return valid.length;
+ });
+ ipcMain.handle('cancel',()=>{const inputs=queue.map(x=>x.input);queue=[];if(active){active.cancelled=true;active.child?.kill();}emit({type:'cancelled',inputs});});
+ // Only discard in-memory entries. Never unlink source files or completed output.
+ ipcMain.handle('clear-queue',()=>{queue=[];const activeInput=active?.input||null;emit({type:'cleared',activeInput});return {activeInput};});
  ipcMain.handle('reveal',(_,p)=>{if(allowed.has(p))shell.showItemInFolder(p);});
  await win.loadFile(path.join(__dirname,'index.html'));
- if(process.env.SVGA_UI_TEST){
- const wc=win.webContents;await wc.executeJavaScript(`new Promise(r=>setTimeout(r,100))`);
- const check=await wc.executeJavaScript(`({scale:document.getElementById('scale').value,fps:document.getElementById('fps').value,codec:document.getElementById('codec').value,padding:document.getElementById('padding').value,bridge:!!window.api})`);
- console.log('UI_DEFAULTS '+JSON.stringify(check));
- await wc.executeJavaScript(`api.onEvent(d=>{if(d.type==='done')console.log('UI_EXPORT_OK '+d.output);if(d.type==='error')console.log('UI_EXPORT_ERROR '+d.message)});api.add([${JSON.stringify(process.env.SVGA_UI_TEST)}])`);
- wc.on('console-message',async(_e,level,msg)=>{if(typeof msg==='string'&&msg.startsWith('UI_EXPORT_OK')){await fsp.writeFile(path.join(__dirname,'..','tests','ui-preview.png'),(await wc.capturePage()).toPNG());console.log(msg);app.exit(0);}if(typeof msg==='string'&&msg.startsWith('UI_EXPORT_ERROR')){console.error(msg);app.exit(1);}});
- setTimeout(()=>app.exit(2),30000);
+ if(!app.isPackaged&&process.argv.includes('--ui-check')){
+  try{await require('../scripts/check-ui.cjs').run({win,app});app.exit(0);}catch(e){console.error(e);app.exit(1);}return;
  }
  const cliFiles=process.argv.filter(f=>/\.svga$/i.test(f));if(cliFiles.length)win.webContents.send('update',{type:'cli',files:cliFiles});
  win.on('close',e=>{if(active||queue.length){const n=dialog.showMessageBoxSync(win,{type:'question',buttons:['继续导出','退出并取消'],defaultId:0,cancelId:0,message:'导出仍在进行，是否退出？'});if(n===0){e.preventDefault();return;}queue=[];if(active){active.cancelled=true;active.child?.kill();}}});

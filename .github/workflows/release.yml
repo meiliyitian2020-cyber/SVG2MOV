@@ -1,7 +1,7 @@
 name: Build and release Windows
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
     paths:
       - package.json
       - package-lock.json
@@ -13,7 +13,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: windows-release
+  group: windows-release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   windows:
@@ -42,8 +42,25 @@ jobs:
         run: ./scripts/prepare-ffmpeg.ps1
       - name: Windows conversion smoke test
         run: node scripts/smoke-export.cjs
+      - name: Window layout, completion toast and queue checks
+        run: node scripts/ui-check.cjs
       - name: Build portable EXE
         run: npm run build:win
+      - name: Verify Chinese executable metadata and icon
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $inner = Join-Path $pkg.build.directories.output "win-unpacked/SVGA 转 MOV.exe"
+          if (!(Test-Path $inner)) { throw "Chinese executable name is missing" }
+          $info = (Get-Item $inner).VersionInfo
+          if ($info.ProductName -ne 'SVGA 转 MOV') { throw "Product name metadata mismatch: $($info.ProductName)" }
+          if (!$info.FileVersion.StartsWith($pkg.version)) { throw "File version mismatch: $($info.FileVersion)" }
+          Add-Type -AssemblyName System.Drawing
+          $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($inner)
+          if ($null -eq $icon) { throw 'Application icon is missing' }
+          $icon.Dispose()
+          Write-Host "Product: $($info.ProductName); Version: $($info.FileVersion); icon present."
+          Write-Host "Signing status: $((Get-AuthenticodeSignature $inner).Status). This build does not claim a trusted code signature."
       - name: Prepare release files
         id: package
         shell: pwsh
@@ -51,9 +68,9 @@ jobs:
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           $version = $pkg.version
           $out = $pkg.build.directories.output
-          $exe = Join-Path $out "SVGA-MOV-Exporter-$version.exe"
-          $zip = Join-Path $out "SVGA-MOV-Exporter-$version.zip"
-          $source = Join-Path $out "SVGA-MOV-Exporter-$version-source.zip"
+          $exe = Join-Path $out ($pkg.build.portable.artifactName.Replace('${version}', $version))
+          $zip = Join-Path $out "SVGA转MOV-$version.zip"
+          $source = Join-Path $out "SVG2MOV-$version-source.zip"
           if (!(Test-Path $exe)) { throw "Expected EXE is missing: $exe" }
           Compress-Archive -Path $exe -DestinationPath $zip
           git archive --format=zip --output=$source HEAD
@@ -73,6 +90,12 @@ jobs:
             ${{ steps.package.outputs.out }}/*.zip
             ${{ steps.package.outputs.out }}/SHA256SUMS.txt
           retention-days: 90
+      - name: Retain UI verification captures
+        uses: actions/upload-artifact@v4
+        with:
+          name: SVG2MOV-v${{ steps.package.outputs.version }}-ui-checks
+          path: .smoke-output/ui/*.png
+          retention-days: 30
       - name: Publish GitHub Release
         shell: pwsh
         env:
@@ -87,11 +110,6 @@ jobs:
             Write-Host "Release $tag already exists; build artifacts are available in this Actions run."
             exit 0
           }
-          $assets = @(
-            (Join-Path $out "SVGA-MOV-Exporter-$version.exe"),
-            (Join-Path $out "SVGA-MOV-Exporter-$version.zip"),
-            (Join-Path $out "SVGA-MOV-Exporter-$version-source.zip"),
-            (Join-Path $out 'SHA256SUMS.txt')
-          )
-          gh release create $tag @assets --target $env:GITHUB_SHA --title "SVG2MOV $version" --notes-file RELEASE_NOTES.md
+          $assets = @(Get-ChildItem $out -File | Where-Object { $_.Extension -in '.exe', '.zip' -or $_.Name -eq 'SHA256SUMS.txt' } | ForEach-Object { $_.FullName })
+          gh release create $tag @assets --target $env:GITHUB_SHA --title "SVGA 转 MOV $version" --notes-file RELEASE_NOTES.md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
